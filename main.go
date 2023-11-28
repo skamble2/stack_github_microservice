@@ -130,13 +130,13 @@ func InsertGitHubData(db *sql.DB, data []*GithubPost, repoName string) error {
 
 func getStackoverflowDBConnection() (*sql.DB, error) {
 	// Replace with your StackOverflow database connection details
-	connStr := "user=postgres dbname=StackoverflowDB password=root host=stack-github-microservice:us-central1:mypostgres sslmode=disable"
+	connStr := "user=postgres dbname=StackoverflowDB password=root host=mypostgres sslmode=disable"
 	return sql.Open("postgres", connStr)
 }
 
 func getGitHubDBConnection() (*sql.DB, error) {
 	// Replace with your GitHub database connection details
-	connStr := "user=postgres dbname=GitHubDB password=root host=stack-github-microservice:us-central1:mypostgres sslmode=disable"
+	connStr := "user=postgres dbname=GitHubDB password=root host=mypostgres sslmode=disable"
 	return sql.Open("postgres", connStr)
 }
 
