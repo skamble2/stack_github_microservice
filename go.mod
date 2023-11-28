@@ -1,6 +1,6 @@
 module stack_github_microservice
 
-go 1.23
+go 1.19
 
 require (
 	github.com/golang/protobuf v1.5.3 // indirect
