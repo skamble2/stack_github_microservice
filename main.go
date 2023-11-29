@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/lib/pq"
 
+	_ "github.com/GoogleCloudPlatform/cloudsql-proxy/proxy/dialers/postgres"
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
 )
@@ -129,15 +130,61 @@ func InsertGitHubData(db *sql.DB, data []*GithubPost, repoName string) error {
 }
 
 func getStackoverflowDBConnection() (*sql.DB, error) {
-	// Replace with your StackOverflow database connection details
-	connStr := "user=postgres dbname=StackoverflowDB password=root host=34.121.167.178 sslmode=disable"
-	return sql.Open("postgres", connStr)
+	// Database connection settings
+	connectionName := "stack-github-microservice:us-central1:mypostgres" // Replace with the actual host or connection name
+	dbUser := "postgres"
+	dbPass := "root"
+	dbName := "StackoverflowDB"
+
+	dbURI := fmt.Sprintf("host=%s dbname=%s user=%s password=%s sslmode=disable",
+		connectionName, dbName, dbUser, dbPass)
+
+	// Initialize the SQL DB handle
+	log.Println("Initializing Stackoverflow database connection")
+	db, err := sql.Open("postgres", dbURI) // Changed from cloudsqlpostgres to postgres
+	if err != nil {
+		log.Fatalf("Error on initializing Stackoverflow database connection: %s", err.Error())
+	}
+	defer db.Close()
+
+	// Test the database connection
+	log.Println("Testing Stackoverflow database connection")
+	err = db.Ping()
+	if err != nil {
+		log.Fatalf("Error on Stackoverflow database connection: %s", err.Error())
+	}
+	log.Println("Stackoverflow Database connection established")
+
+	return db, err
 }
 
 func getGitHubDBConnection() (*sql.DB, error) {
-	// Replace with your GitHub database connection details
-	connStr := "user=postgres dbname=GitHubDB password=root host=34.121.167.178 sslmode=disable"
-	return sql.Open("postgres", connStr)
+	// Database connection settings
+	connectionName := "stack-github-microservice:us-central1:mypostgres" // Replace with the actual host or connection name
+	dbUser := "postgres"
+	dbPass := "root"
+	dbName := "GitHubDB" // Change to the actual GitHub database name
+
+	dbURI := fmt.Sprintf("host=%s dbname=%s user=%s password=%s sslmode=disable",
+		connectionName, dbName, dbUser, dbPass)
+
+	// Initialize the SQL DB handle
+	log.Println("Initializing GitHub database connection")
+	db, err := sql.Open("postgres", dbURI) // Use "postgres" as the driver name
+	if err != nil {
+		log.Fatalf("Error on initializing GitHub database connection: %s", err.Error())
+	}
+	defer db.Close()
+
+	// Test the database connection
+	log.Println("Testing GitHub database connection")
+	err = db.Ping()
+	if err != nil {
+		log.Fatalf("Error on GitHub database connection: %s", err.Error())
+	}
+	log.Println("GitHub Database connection established")
+
+	return db, err
 }
 
 // Function to fetch questions and answers from StackOverflow
