@@ -131,7 +131,7 @@ func InsertGitHubData(db *sql.DB, data []*GithubPost, repoName string) error {
 
 func getStackoverflowDBConnection() (*sql.DB, error) {
 	// Database connection settings
-	connectionName := "34.121.167.178" // Replace with the actual host or connection name
+	connectionName := "/cloudsql/stack-github-assignment5:us-central1:mypostgres" // Replace with the actual host or connection name
 	dbUser := "postgres"
 	dbPass := "root"
 	dbName := "StackoverflowDB"
@@ -160,7 +160,7 @@ func getStackoverflowDBConnection() (*sql.DB, error) {
 
 func getGitHubDBConnection() (*sql.DB, error) {
 	// Database connection settings
-	connectionName := "34.121.167.178" // Replace with the actual host or connection name
+	connectionName := "/cloudsql/stack-github-assignment5:us-central1:mypostgres" // Replace with the actual host or connection name
 	dbUser := "postgres"
 	dbPass := "root"
 	dbName := "GitHubDB" // Change to the actual GitHub database name
