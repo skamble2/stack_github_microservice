@@ -8,7 +8,12 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/lib/pq"
 
@@ -16,6 +21,7 @@ import (
 
 	_ "github.com/GoogleCloudPlatform/cloudsql-proxy/proxy/dialers/postgres"
 	"github.com/google/go-github/github"
+	"github.com/joho/godotenv"
 	"golang.org/x/oauth2"
 )
 
@@ -25,6 +31,89 @@ type StackOverflowPost struct {
 	QuestionTitle string                `json:"title"`
 	QuestionBody  string                `json:"body"`
 	Answers       []StackOverflowAnswer `json:"answers"`
+}
+
+var (
+	githubAPICalls = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Name: "github_api_calls_per_second",
+			Help: "Rate of API calls made to GitHub per second",
+		},
+		[]string{"endpoint"},
+	)
+	stackoverflowAPICalls = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Name: "stackoverflow_api_calls_per_second",
+			Help: "Rate of API calls made to StackOverflow per second",
+		},
+		[]string{"endpoint"},
+	)
+	dataCollectedPerSecond = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Name: "data_collected_per_second",
+			Help: "Amount of data collected per second",
+		},
+		[]string{"source"},
+	)
+	totalGithubAPICalls = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "total_github_api_calls",
+			Help: "Total number of API calls made to GitHub",
+		},
+	)
+	totalStackOverflowAPICalls = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "total_stackoverflow_api_calls",
+			Help: "Total number of API calls made to StackOverflow",
+		},
+	)
+	githubAPICalls2Days = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "github_api_calls_2_days_total",
+			Help: "Total number of API calls made to GitHub in the past 2 days",
+		},
+	)
+	githubAPICalls7Days = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "github_api_calls_7_days_total",
+			Help: "Total number of API calls made to GitHub in the past 7 days",
+		},
+	)
+	githubAPICalls45Days = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "github_api_calls_45_days_total",
+			Help: "Total number of API calls made to GitHub in the past 45 days",
+		},
+	)
+
+	// StackOverflow API call counters for different durations
+	stackoverflowAPICalls2Days = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "stackoverflow_api_calls_2_days_total",
+			Help: "Total number of API calls made to StackOverflow in the past 2 days",
+		},
+	)
+	stackoverflowAPICalls7Days = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "stackoverflow_api_calls_7_days_total",
+			Help: "Total number of API calls made to StackOverflow in the past 7 days",
+		},
+	)
+	stackoverflowAPICalls45Days = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "stackoverflow_api_calls_45_days_total",
+			Help: "Total number of API calls made to StackOverflow in the past 45 days",
+		},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(githubAPICalls, stackoverflowAPICalls, dataCollectedPerSecond)
+	prometheus.MustRegister(totalGithubAPICalls, totalStackOverflowAPICalls)
+	prometheus.MustRegister(
+		githubAPICalls2Days, githubAPICalls7Days, githubAPICalls45Days,
+		stackoverflowAPICalls2Days, stackoverflowAPICalls7Days, stackoverflowAPICalls45Days,
+	)
 }
 
 type StackOverflowAnswer struct {
@@ -173,6 +262,7 @@ func getGitHubDBConnection() (*sql.DB, error) {
 	if err != nil {
 		log.Fatalf("Error on initializing GitHub database connection: %s", err.Error())
 	}
+
 	// Test the database connection
 	log.Println("Testing GitHub database connection")
 	err = db.Ping()
@@ -185,10 +275,10 @@ func getGitHubDBConnection() (*sql.DB, error) {
 }
 
 // Function to fetch questions and answers from StackOverflow
-func GetStackOverflowPosts(tag string) ([]StackOverflowPost, error) {
+func GetStackOverflowPosts(tag string, fromDate time.Time) ([]StackOverflowPost, error) {
+	start := time.Now()
 	// Endpoint for fetching questions with tag
-	questionsURL := fmt.Sprintf("https://api.stackexchange.com/2.2/questions?order=desc&sort=activity&tagged=%s&site=stackoverflow&filter=withbody&pagesize=5", tag)
-
+	questionsURL := fmt.Sprintf("https://api.stackexchange.com/2.2/questions?order=desc&sort=activity&tagged=%s&site=stackoverflow&filter=withbody&pagesize=5&fromdate=%d", tag, fromDate.Unix())
 	// Make the HTTP request to StackOverflow API
 	questionResp, err := http.Get(questionsURL)
 	if err != nil {
@@ -253,12 +343,20 @@ func GetStackOverflowPosts(tag string) ([]StackOverflowPost, error) {
 			Answers:       answersData.Items,
 		})
 	}
+	duration := time.Since(start).Seconds()
+	if duration == 0 {
+		duration = 1 // Avoid division by zero
+	}
+	rate := 1 / duration // Calculate the rate
+	stackoverflowAPICalls.WithLabelValues("stackoverflow_endpoint").Observe(rate)
+	totalStackOverflowAPICalls.Inc()
 
 	return posts, nil
 }
 
 // Function to fetch questions (issues) and answers (comments) from a GitHub repository
-func GetGitHubData(owner, repo string, accessToken string) ([]*GithubPost, error) {
+func GetGitHubData(owner, repo string, accessToken string, fromDate time.Time) ([]*GithubPost, error) {
+	start := time.Now()
 	ctx := context.Background()
 	ts := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: accessToken},
@@ -266,8 +364,7 @@ func GetGitHubData(owner, repo string, accessToken string) ([]*GithubPost, error
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 
-	// Fetching only open issues for the repository
-	issues, _, err := client.Issues.ListByRepo(ctx, owner, repo, &github.IssueListByRepoOptions{State: "open"})
+	issues, _, err := client.Issues.ListByRepo(ctx, owner, repo, &github.IssueListByRepoOptions{State: "open", Since: fromDate})
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +395,83 @@ func GetGitHubData(owner, repo string, accessToken string) ([]*GithubPost, error
 		}
 	}
 
+	duration := time.Since(start).Seconds()
+	if duration == 0 {
+		duration = 1 // Avoid division by zero
+	}
+	rate := 1 / duration // Calculate the rate
+	githubAPICalls.WithLabelValues("github_endpoint").Observe(rate)
+	totalGithubAPICalls.Inc()
+
 	return posts, nil
+}
+
+func RunExperiment(duration time.Duration, stackoverflowDB *sql.DB, githubDB *sql.DB) {
+	fromDate := time.Now().Add(-duration)
+
+	err := godotenv.Load("config.env")
+	if err != nil {
+		log.Fatalf("Error loading .env file: %s", err)
+	}
+
+	githubToken := os.Getenv("GITHUB_TOKEN")
+	if githubToken == "" {
+		log.Fatal("GitHub token not found in environment variables")
+	}
+
+	// Define a list of frameworks/libraries and their GitHub repositories
+	frameworks := map[string][]string{
+		"Prometheus": {"prometheus", "prometheus"},
+		"Selenium":   {"SeleniumHQ", "selenium"},
+		"OpenAI":     {"openai", "gym"},
+		"Docker":     {"docker", "docker"},
+		"Milvus":     {"milvus-io", "milvus"},
+		"Go":         {"golang", "go"},
+	}
+
+	var totalGithubCalls, totalStackOverflowCalls int
+
+	// Iterate over each framework/library
+	for framework, repoInfo := range frameworks {
+		// Fetch and insert StackOverflow data
+		posts, err := GetStackOverflowPosts(framework, fromDate)
+		if err != nil {
+			log.Fatalf("Error fetching StackOverflow posts for %s: %s\n", framework, err)
+		}
+		err = InsertStackOverflowData(stackoverflowDB, posts, framework)
+		if err != nil {
+			log.Fatalf("Error inserting StackOverflow posts for %s into the database: %s\n", framework, err)
+		}
+		totalStackOverflowCalls += len(posts) // Count the number of StackOverflow API calls
+
+		// Fetch and insert GitHub data
+		if len(repoInfo) == 2 {
+			gitHubData, err := GetGitHubData(repoInfo[0], repoInfo[1], "githubToken", fromDate)
+			if err != nil {
+				log.Fatalf("Error fetching data from GitHub for %s: %s\n", framework, err)
+			}
+			err = InsertGitHubData(githubDB, gitHubData, repoInfo[1])
+			if err != nil {
+				log.Fatalf("Error inserting GitHub data for %s into the GithubDB: %s\n", framework, err)
+			}
+			totalGithubCalls += len(gitHubData) // Count the number of GitHub API calls
+		} else {
+			log.Printf("Invalid repository information for %s\n", framework)
+		}
+	}
+
+	// Increment the appropriate counter based on the duration
+	switch duration {
+	case 2 * 24 * time.Hour:
+		githubAPICalls2Days.Add(float64(totalGithubCalls))
+		stackoverflowAPICalls2Days.Add(float64(totalStackOverflowCalls))
+	case 7 * 24 * time.Hour:
+		githubAPICalls7Days.Add(float64(totalGithubCalls))
+		stackoverflowAPICalls7Days.Add(float64(totalStackOverflowCalls))
+	case 45 * 24 * time.Hour:
+		githubAPICalls45Days.Add(float64(totalGithubCalls))
+		stackoverflowAPICalls45Days.Add(float64(totalStackOverflowCalls))
+	}
 }
 
 func main() {
@@ -314,41 +487,13 @@ func main() {
 	}
 	defer githubDB.Close()
 
-	// Define a list of frameworks/libraries and their GitHub repositories
-	frameworks := map[string][]string{
-		"Prometheus": {"prometheus", "prometheus"},
-		"Selenium":   {"SeleniumHQ", "selenium"},
-		"OpenAI":     {"openai", "gym"},
-		"Docker":     {"docker", "docker"},
-		"Milvus":     {"milvus-io", "milvus"},
-		"Go":         {"golang", "go"},
-	}
+	http.Handle("/metrics", promhttp.Handler())
+	go http.ListenAndServe(":8080", nil)
 
-	// Iterate over each framework/library
-	for framework, repoInfo := range frameworks {
-		// Fetch and insert StackOverflow data
-		posts, err := GetStackOverflowPosts(framework)
-		if err != nil {
-			log.Fatalf("Error fetching StackOverflow posts for %s: %s\n", framework, err)
-		}
-		err = InsertStackOverflowData(stackoverflowDB, posts, framework) // Include the framework name
-		if err != nil {
-			log.Fatalf("Error inserting StackOverflow posts for %s into the database: %s\n", framework, err)
-		}
-		fmt.Printf("StackOverflow posts for %s inserted into the StackoverflowDB successfully.\n", framework)
+	// Run experiments for different durations
+	RunExperiment(2*24*time.Hour, stackoverflowDB, githubDB)  // For past 2 days
+	RunExperiment(7*24*time.Hour, stackoverflowDB, githubDB)  // For past 7 days
+	RunExperiment(45*24*time.Hour, stackoverflowDB, githubDB) // For past 45 days
 
-		if len(repoInfo) == 2 {
-			gitHubData, err := GetGitHubData(repoInfo[0], repoInfo[1], "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") // Replace with actual token
-			if err != nil {
-				log.Fatalf("Error fetching data from GitHub for %s: %s\n", framework, err)
-			}
-			err = InsertGitHubData(githubDB, gitHubData, repoInfo[1]) // Include the repository name
-			if err != nil {
-				log.Fatalf("Error inserting GitHub data for %s into the GithubDB: %s\n", framework, err)
-			}
-			fmt.Printf("GitHub data for %s inserted into the GithubDB successfully.\n", framework)
-		} else {
-			log.Printf("Invalid repository information for %s\n", framework)
-		}
-	}
+	time.Sleep(24 * time.Hour)
 }
