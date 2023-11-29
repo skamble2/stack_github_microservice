@@ -1,6 +1,6 @@
 module stack_github_microservice
 
-go 1.23
+go 1.19
 
 require (
 	cloud.google.com/go/compute v1.23.1 // indirect
