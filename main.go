@@ -145,7 +145,6 @@ func getStackoverflowDBConnection() (*sql.DB, error) {
 	if err != nil {
 		log.Fatalf("Error on initializing Stackoverflow database connection: %s", err.Error())
 	}
-	defer db.Close()
 
 	// Test the database connection
 	log.Println("Testing Stackoverflow database connection")
@@ -174,8 +173,6 @@ func getGitHubDBConnection() (*sql.DB, error) {
 	if err != nil {
 		log.Fatalf("Error on initializing GitHub database connection: %s", err.Error())
 	}
-	defer db.Close()
-
 	// Test the database connection
 	log.Println("Testing GitHub database connection")
 	err = db.Ping()
